@@ -1,11 +1,4 @@
-# WebAuthn
-
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/laragear/webauthn.svg)](https://packagist.org/packages/laragear/webauthn)
-[![Latest stable test run](https://github.com/Laragear/WebAuthn/actions/workflows/php.yml/badge.svg?branch=1.x)](https://github.com/Laragear/WebAuthn/actions/workflows/php.yml)
-[![Codecov coverage](https://codecov.io/gh/Laragear/WebAuthn/branch/1.x/graph/badge.svg?token=HIngrvQeOj)](https://codecov.io/gh/Laragear/WebAuthn)
-[![CodeClimate Maintainability](https://api.codeclimate.com/v1/badges/39841b40ab4b05b8f9d3/maintainability)](https://codeclimate.com/github/Laragear/WebAuthn/maintainability)
-[![Sonarcloud Status](https://sonarcloud.io/api/project_badges/measure?project=Laragear_WebAuthn&metric=alert_status)](https://sonarcloud.io/dashboard?id=Laragear_WebAuthn)
-[![Laravel Octane Compatibility](https://img.shields.io/badge/Laravel%20Octane-Compatible-success?style=flat&logo=laravel)](https://laravel.com/docs/9.x/octane#introduction)
+# Laravel WebAuthn
 
 Authenticate users with Passkeys: fingerprints, patterns and biometric data.
 
@@ -16,6 +9,7 @@ use Laragear\WebAuthn\Http\Requests\AssertedRequest;
 public function login(AssertedRequest $request)
 {
     $user = $request->login();
+    // $user = $request->login('web', null, false, true); useJWT
 
     return response()->json(['message' => "Welcome back, $user->name!"]);
 }
@@ -46,7 +40,7 @@ Your support allows me to keep this package free, up-to-date and maintainable. A
 Require this package into your project using Composer:
 
 ```bash
-composer require laragear/webauthn
+composer require jackmartin/laravel-webauthn
 ```
 
 ## How Passkeys work?

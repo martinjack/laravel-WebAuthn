@@ -5,8 +5,6 @@ namespace Laragear\WebAuthn\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
 
-use function auth;
-
 class AssertedRequest extends FormRequest
 {
     /**
@@ -17,13 +15,13 @@ class AssertedRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'id' => 'required|string',
-            'rawId' => 'required|string',
+            'id'                         => 'required|string',
+            'rawId'                      => 'required|string',
             'response.authenticatorData' => 'required|string',
-            'response.clientDataJSON' => 'required|string',
-            'response.signature' => 'required|string',
-            'response.userHandle' => 'sometimes|nullable',
-            'type' => 'required|string',
+            'response.clientDataJSON'    => 'required|string',
+            'response.signature'         => 'required|string',
+            'response.userHandle'        => 'sometimes|nullable',
+            'type'                       => 'required|string',
         ];
     }
 
@@ -33,8 +31,8 @@ class AssertedRequest extends FormRequest
     public function hasRemember(): bool
     {
         return $this->hasHeader('X-WebAuthn-Remember')
-            || $this->hasHeader('WebAuthn-Remember')
-            || $this->filled('remember');
+        || $this->hasHeader('WebAuthn-Remember')
+        || $this->filled('remember');
     }
 
     /**
@@ -49,13 +47,16 @@ class AssertedRequest extends FormRequest
     public function login(
         string $guard = null,
         bool $remember = null,
-        bool $destroySession = false
+        bool $destroySession = false,
+        bool $useJWT = false
     ): ?WebAuthnAuthenticatable {
         /** @var \Illuminate\Contracts\Auth\StatefulGuard $auth */
         $auth = auth()->guard($guard);
 
         if ($auth->attempt($this->validated(), $remember ?? $this->hasRemember())) {
-            $this->session()->regenerate($destroySession);
+            if (!$useJWT) {
+                $this->session()->regenerate($destroySession);
+            }
 
             // @phpstan-ignore-next-line
             return $auth->user();

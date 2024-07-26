@@ -1,5 +1,5 @@
 {
-    "name": "laragear/webauthn",
+    "name": "jackmartin/laravel-webauthn",
     "description": "Authenticate users with Passkeys: fingerprints, patterns and biometric data.",
     "type": "library",
     "license": "MIT",
