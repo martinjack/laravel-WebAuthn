@@ -1,5 +1,7 @@
 # Laravel WebAuthn
 
+[![Latest Stable Version](https://poser.pugx.org/jackmartin/laravel-webauthn/v/stable)](https://packagist.org/packages/jackmartin/laravel-webauthn) [![Total Downloads](https://poser.pugx.org/jackmartin/laravel-webauthn/downloads)](https://packagist.org/packages/jackmartin/laravel-webauthn) [![License](https://poser.pugx.org/jackmartin/laravel-webauthn/license)](https://packagist.org/packages/jackmartin/laravel-webauthn)
+
 Authenticate users with Passkeys: fingerprints, patterns and biometric data.
 
 ```php
