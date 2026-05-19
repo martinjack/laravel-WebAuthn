@@ -2,6 +2,7 @@
 
 namespace Laragear\WebAuthn\Http\Requests;
 
+use Closure;
 use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Foundation\Http\FormRequest;
 use Laragear\WebAuthn\Attestation\Creator\AttestationCreation;
@@ -45,7 +46,7 @@ class AttestationRequest extends FormRequest
      */
     protected function attestation(): AttestationCreation
     {
-        return $this->attestation ??= new AttestationCreation($this->user(), $this);
+        return $this->attestation ??= new AttestationCreation($this->user());
     }
 
     /**
@@ -55,7 +56,7 @@ class AttestationRequest extends FormRequest
      */
     public function fastRegistration(): static
     {
-        $this->attestation()->userVerification = UserVerification::DISCOURAGED;
+        $this->attestation()->userVerification = UserVerification::Discouraged;
 
         return $this;
     }
@@ -67,7 +68,7 @@ class AttestationRequest extends FormRequest
      */
     public function secureRegistration(): static
     {
-        $this->attestation()->userVerification = UserVerification::REQUIRED;
+        $this->attestation()->userVerification = UserVerification::Required;
 
         return $this;
     }
@@ -79,7 +80,7 @@ class AttestationRequest extends FormRequest
      */
     public function userless(): static
     {
-        $this->attestation()->residentKey = ResidentKey::REQUIRED;
+        $this->attestation()->residentKey = ResidentKey::Required;
 
         return $this;
     }
@@ -92,6 +93,19 @@ class AttestationRequest extends FormRequest
     public function allowDuplicates(): static
     {
         $this->attestation()->uniqueCredentials = false;
+
+        return $this;
+    }
+
+    /**
+     * Use a callback to return the name and display name of the credential ID.
+     *
+     * @param  \Closure(\Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable, bool):\Laragear\WebAuthn\WebAuthnData  $callback
+     * @return $this
+     */
+    public function using(Closure $callback): static
+    {
+        $this->attestation()->using = $callback;
 
         return $this;
     }

@@ -19,15 +19,10 @@ trait WebAuthnAuthentication
 {
     /**
      * Returns displayable data to be used to create WebAuthn Credentials.
-     *
-     * @return array{name: string, displayName: string}
      */
-    public function webAuthnData(): array
+    public function webAuthnData(): WebAuthnData
     {
-        return [
-            'name' => $this->email,
-            'displayName' => $this->name,
-        ];
+        return WebAuthnData::make($this->email, $this->name);
     }
 
     /**
@@ -87,9 +82,7 @@ trait WebAuthnAuthentication
     /**
      * Returns a queryable relationship for its WebAuthn Credentials.
      *
-     * @phpstan-ignore-next-line
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphMany|\Laragear\WebAuthn\Models\WebAuthnCredential
+     * @return \Illuminate\Database\Eloquent\Relations\MorphMany<\Laragear\WebAuthn\Models\WebAuthnCredential, $this>
      */
     public function webAuthnCredentials(): MorphMany
     {

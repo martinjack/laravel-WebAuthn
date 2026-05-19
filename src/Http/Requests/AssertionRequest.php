@@ -13,6 +13,9 @@ use Laragear\WebAuthn\Enums\UserVerification;
 use function auth;
 use function is_array;
 
+/**
+ * @method \Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable|null user($guard = null)
+ */
 class AssertionRequest extends FormRequest
 {
     /**
@@ -37,6 +40,7 @@ class AssertionRequest extends FormRequest
      */
     public function validateResolved(): void
     {
+        //
     }
 
     /**
@@ -44,7 +48,7 @@ class AssertionRequest extends FormRequest
      */
     protected function assertion(): AssertionCreation
     {
-        return $this->assertion ??= new AssertionCreation($this);
+        return $this->assertion ??= new AssertionCreation();
     }
 
     /**
@@ -66,7 +70,7 @@ class AssertionRequest extends FormRequest
      */
     public function fastLogin(): static
     {
-        $this->assertion()->userVerification = UserVerification::DISCOURAGED;
+        $this->assertion()->userVerification = UserVerification::Discouraged;
 
         return $this;
     }
@@ -78,7 +82,7 @@ class AssertionRequest extends FormRequest
      */
     public function secureLogin(): static
     {
-        $this->assertion()->userVerification = UserVerification::REQUIRED;
+        $this->assertion()->userVerification = UserVerification::Required;
 
         return $this;
     }

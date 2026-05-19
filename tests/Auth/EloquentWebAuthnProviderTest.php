@@ -4,8 +4,10 @@
 
 namespace Tests\Auth;
 
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Auth;
 use Laragear\WebAuthn\Assertion\Validator\AssertionValidator;
+use Laragear\WebAuthn\Auth\WebAuthnUserProvider;
 use Laragear\WebAuthn\Exceptions\AssertionException;
 use Laragear\WebAuthn\Models\WebAuthnCredential;
 use Mockery;
@@ -17,6 +19,13 @@ use Tests\Stubs\WebAuthnAuthenticatableUser;
 
 class EloquentWebAuthnProviderTest extends DatabaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        WebAuthnUserProvider::$validateUsing = null;
+    }
+
     protected function defineEnvironment($app): void
     {
         $app->make('config')->set('auth.providers.users.driver', 'eloquent-webauthn');
@@ -83,6 +92,28 @@ class EloquentWebAuthnProviderTest extends DatabaseTestCase
         ]);
 
         static::assertNull($retrieved);
+    }
+
+    public function test_validates_user_with_custom_callback(): void
+    {
+        $user = new User();
+
+        WebAuthnUserProvider::$validateUsing = function (User $attempting, array $credentials) use ($user) {
+            static::assertSame($user, $attempting);
+
+            if (! empty($credentials)) {
+                return $credentials['return'];
+            }
+        };
+
+        $provider = Auth::createUserProvider('users');
+
+        static::assertTrue($provider->validateCredentials($user, ['return' => true]));
+        static::assertFalse($provider->validateCredentials($user, ['return' => false]));
+
+        WebAuthnUserProvider::$validateUsing = null;
+
+        static::assertFalse($provider->validateCredentials($user, ['password' => null]));
     }
 
     public function test_retrieves_user_using_classic_credentials_without_fallback(): void

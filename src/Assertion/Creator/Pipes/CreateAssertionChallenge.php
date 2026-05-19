@@ -3,18 +3,19 @@
 namespace Laragear\WebAuthn\Assertion\Creator\Pipes;
 
 use Closure;
-use Illuminate\Contracts\Config\Repository;
+use Illuminate\Config\Repository as ConfigContract;
 use Laragear\WebAuthn\Assertion\Creator\AssertionCreation;
-use Laragear\WebAuthn\Attestation\SessionChallenge;
+use Laragear\WebAuthn\Challenge\Challenge;
+use Laragear\WebAuthn\Contracts\WebAuthnChallengeRepository as ChallengeRepositoryContract;
+use Laragear\WebAuthn\Enums\UserVerification;
+use Laragear\WebAuthn\Models\WebAuthnCredential;
 
 class CreateAssertionChallenge
 {
-    use SessionChallenge;
-
     /**
      * Create a new pipe instance.
      */
-    public function __construct(protected Repository $config)
+    public function __construct(protected ChallengeRepositoryContract $challenge, protected ConfigContract $config)
     {
         //
     }
@@ -26,16 +27,23 @@ class CreateAssertionChallenge
      */
     public function handle(AssertionCreation $assertion, Closure $next): mixed
     {
-        $options = [];
+        $assertion->challenge ??= Challenge::random(
+            $this->config->get('webauthn.challenge.bytes'),
+            $this->config->get('webauthn.challenge.timeout'),
+        );
+
+        $assertion->challenge->verify = $assertion->userVerification === UserVerification::Required;
 
         if ($assertion->acceptedCredentials?->isNotEmpty()) {
-            // @phpstan-ignore-next-line
-            $options['credentials'] = $assertion->acceptedCredentials->map->getKey()->toArray();
+            $assertion->challenge->properties['credentials'] = $assertion->acceptedCredentials
+                ->map(static function (WebAuthnCredential $credential): string {
+                    return $credential->getKey();
+                })->toArray();
         }
 
-        $challenge = $this->storeChallenge($assertion->request, $assertion->userVerification, $options);
+        $assertion->json->set('challenge', $assertion->challenge->data);
 
-        $assertion->json->set('challenge', $challenge->data);
+        $this->challenge->store($assertion, $assertion->challenge);
 
         return $next($assertion);
     }

@@ -30,7 +30,7 @@ abstract class CompileClientDataJson
     {
         try {
             $object = json_decode(
-                ByteBuffer::decodeBase64Url($validation->request->json('response.clientDataJSON', '')),
+                ByteBuffer::decodeBase64Url($validation->json->get('response.clientDataJSON', '')),
                 false, 32, JSON_THROW_ON_ERROR
             );
         } catch (JsonException) {

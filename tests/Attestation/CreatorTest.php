@@ -7,12 +7,15 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Laragear\WebAuthn\Attestation\Creator\AttestationCreation;
 use Laragear\WebAuthn\Attestation\Creator\AttestationCreator;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\ByteBuffer;
+use Laragear\WebAuthn\Challenge\Challenge;
 use Laragear\WebAuthn\Enums\ResidentKey;
 use Laragear\WebAuthn\Enums\UserVerification;
+use Laragear\WebAuthn\WebAuthnData;
 use Ramsey\Uuid\Uuid;
 use Tests\DatabaseTestCase;
 use Tests\Stubs\WebAuthnAuthenticatableUser;
+use UnexpectedValueException;
 
 use function config;
 use function now;
@@ -20,7 +23,6 @@ use function session;
 
 class CreatorTest extends DatabaseTestCase
 {
-    protected Request $request;
     protected WebAuthnAuthenticatableUser $user;
     protected AttestationCreation $creation;
     protected AttestationCreator $creator;
@@ -37,13 +39,10 @@ class CreatorTest extends DatabaseTestCase
     protected function setUp(): void
     {
         $this->afterApplicationCreated(function (): void {
-            $this->request = Request::create('https://test.app/webauthn/create', 'POST');
-
             $this->creator = new AttestationCreator($this->app);
-            $this->creation = new AttestationCreation($this->user, $this->request);
+            $this->creation = new AttestationCreation($this->user);
 
             $this->startSession();
-            $this->request->setLaravelSession($this->app->make('session.store'));
         });
 
         parent::setUp();
@@ -52,8 +51,18 @@ class CreatorTest extends DatabaseTestCase
     protected function response(): TestResponse
     {
         return $this->createTestResponse(
-            $this->creator->send($this->creation)->thenReturn()->json->toResponse($this->request), null
+            $this->creator->send($this->creation)->thenReturn()->json->toResponse(new Request()), null
         );
+    }
+
+    public function test_throws_when_not_set(): void
+    {
+        $this->creation->user = null;
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('There is no user set for the ceremony.');
+
+        $this->response();
     }
 
     public function test_base_structure(): void
@@ -62,7 +71,8 @@ class CreatorTest extends DatabaseTestCase
 
         $this->response()
             ->assertSessionHas('_webauthn', function (Challenge $challenge): bool {
-                static::assertSame(now()->addMinute()->getTimestamp(), $challenge->timeout);
+                static::assertSame(60, $challenge->timeout);
+                static::assertSame(now()->addMinute()->getTimestamp(), $challenge->expiresAt);
                 static::assertTrue(Uuid::isValid(Uuid::fromString($challenge->properties['user_uuid'])));
                 static::assertSame('test@email.com', $challenge->properties['user_handle']);
                 static::assertFalse($challenge->verify);
@@ -105,7 +115,7 @@ class CreatorTest extends DatabaseTestCase
 
     public function test_asks_for_user_verification(): void
     {
-        $this->creation->userVerification = UserVerification::REQUIRED;
+        $this->creation->userVerification = UserVerification::Required;
 
         $this->response()
             ->assertSessionHas('_webauthn', static function (Challenge $challenge): bool {
@@ -113,6 +123,8 @@ class CreatorTest extends DatabaseTestCase
             })
             ->assertJsonFragment([
                 'authenticatorSelection' => [
+                    'requireResidentKey' => false,
+                    'residentKey' => 'preferred',
                     'userVerification' => 'required',
                 ],
             ]);
@@ -120,7 +132,7 @@ class CreatorTest extends DatabaseTestCase
 
     public function test_asks_for_user_presence(): void
     {
-        $this->creation->userVerification = UserVerification::DISCOURAGED;
+        $this->creation->userVerification = UserVerification::Discouraged;
 
         $this->response()
             ->assertSessionHas('_webauthn', static function (Challenge $challenge): bool {
@@ -128,6 +140,8 @@ class CreatorTest extends DatabaseTestCase
             })
             ->assertJsonFragment([
                 'authenticatorSelection' => [
+                    'requireResidentKey' => false,
+                    'residentKey' => 'preferred',
                     'userVerification' => 'discouraged',
                 ],
             ]);
@@ -135,7 +149,7 @@ class CreatorTest extends DatabaseTestCase
 
     public function test_asks_for_resident_key(): void
     {
-        $this->creation->residentKey = ResidentKey::REQUIRED;
+        $this->creation->residentKey = ResidentKey::Required;
 
         $this->response()
             ->assertSessionHas('_webauthn', static function (Challenge $challenge): bool {
@@ -161,7 +175,7 @@ class CreatorTest extends DatabaseTestCase
         ])->save();
 
         $this->response()
-            ->assertJsonPath('user.id', $uuid->toString());
+            ->assertJsonPath('user.id', $uuid->getHex()->toString());
     }
 
     public function test_adds_existing_credentials_if_unique_by_default(): void
@@ -195,5 +209,35 @@ class CreatorTest extends DatabaseTestCase
         ])->save();
 
         $this->response()->assertJsonMissing(['excludeCredentials']);
+    }
+
+    public function test_accepts_custom_challenge(): void
+    {
+        $this->creation->user = $this->user;
+
+        $this->creation->challenge = new Challenge(new ByteBuffer('1'), 10);
+
+        $this->response()
+            ->assertSessionHas('_webauthn', function (Challenge $challenge): bool {
+                return $challenge->data->hashEqual('1');
+            });
+    }
+
+    public function test_uses_custom_name_and_display_name_at_runtime(): void
+    {
+        $this->creation->using = function (WebAuthnAuthenticatableUser $user, $unique): WebAuthnData {
+            static::assertTrue($unique);
+
+            return new WebAuthnData('foo', 'bar');
+        };
+
+        $this->response()
+            ->assertJsonFragment([
+                'user' => [
+                    'name' => 'foo',
+                    'displayName' => 'bar',
+                    'id' => session('_webauthn')->properties['user_uuid'],
+                ],
+            ]);
     }
 }

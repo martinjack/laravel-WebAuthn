@@ -5,15 +5,17 @@ namespace Tests\Http\Requests;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\Challenge\Challenge;
 use Laragear\WebAuthn\Http\Requests\AttestationRequest;
 use Laragear\WebAuthn\Models\WebAuthnCredential;
+use Laragear\WebAuthn\WebAuthnData;
 use Ramsey\Uuid\Uuid;
 use Tests\DatabaseTestCase;
 use Tests\FakeAuthenticator;
 use Tests\Stubs\WebAuthnAuthenticatableUser;
 
 use function config;
+use function session;
 
 class AttestationRequestTest extends DatabaseTestCase
 {
@@ -103,6 +105,22 @@ class AttestationRequestTest extends DatabaseTestCase
                 return true;
             })
             ->assertJsonPath('authenticatorSelection.userVerification', 'required');
+    }
+
+    public function test_uses_callback_for_webauthn_data(): void
+    {
+        Route::middleware('web')->post('test', function (AttestationRequest $request) {
+            return $request->using(fn () => WebAuthnData::make('foo', 'bar'))->toCreate();
+        });
+
+        $this->postJson('test')
+            ->assertJsonFragment([
+                'user' => [
+                    'name' => 'foo',
+                    'displayName' => 'bar',
+                    'id' => session('_webauthn')->properties['user_uuid'],
+                ],
+            ]);
     }
 
     public function test_uses_userless_and_verifies_user(): void

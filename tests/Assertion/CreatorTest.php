@@ -6,7 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Testing\TestResponse;
 use Laragear\WebAuthn\Assertion\Creator\AssertionCreation;
 use Laragear\WebAuthn\Assertion\Creator\AssertionCreator;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\ByteBuffer;
+use Laragear\WebAuthn\Challenge\Challenge;
 use Laragear\WebAuthn\Enums\UserVerification;
 use Ramsey\Uuid\Uuid;
 use Tests\DatabaseTestCase;
@@ -19,7 +20,6 @@ use function session;
 
 class CreatorTest extends DatabaseTestCase
 {
-    protected Request $request;
     protected WebAuthnAuthenticatableUser $user;
     protected AssertionCreation $creation;
     protected AssertionCreator $creator;
@@ -36,13 +36,10 @@ class CreatorTest extends DatabaseTestCase
     protected function setUp(): void
     {
         $this->afterApplicationCreated(function (): void {
-            $this->request = Request::create('https://test.app/webauthn/create', 'POST');
-
             $this->creator = new AssertionCreator($this->app);
-            $this->creation = new AssertionCreation($this->request);
+            $this->creation = new AssertionCreation();
 
             $this->startSession();
-            $this->request->setLaravelSession($this->app->make('session.store'));
         });
 
         parent::setUp();
@@ -51,7 +48,7 @@ class CreatorTest extends DatabaseTestCase
     protected function response(): TestResponse
     {
         return $this->createTestResponse(
-            $this->creator->send($this->creation)->thenReturn()->json->toResponse($this->request), null
+            $this->creator->send($this->creation)->thenReturn()->json->toResponse(new Request), null
         );
     }
 
@@ -63,7 +60,8 @@ class CreatorTest extends DatabaseTestCase
 
         $this->response()
             ->assertSessionHas('_webauthn', static function (Challenge $challenge): bool {
-                return now()->addMinutes(2)->getTimestamp() === $challenge->timeout;
+                return now()->addMinutes(2)->getTimestamp() === $challenge->expiresAt
+                    && 120 === $challenge->timeout;
             })
             ->assertJson([
                 'timeout' => 120000,
@@ -86,7 +84,8 @@ class CreatorTest extends DatabaseTestCase
 
         $this->response()
             ->assertSessionHas('_webauthn', function (Challenge $challenge): bool {
-                static::assertSame(now()->addMinute()->getTimestamp(), $challenge->timeout);
+                static::assertSame(60, $challenge->timeout);
+                static::assertSame(now()->addMinute()->getTimestamp(), $challenge->expiresAt);
                 static::assertFalse($challenge->verify);
 
                 return true;
@@ -158,7 +157,7 @@ class CreatorTest extends DatabaseTestCase
 
     public function test_forces_user_verification(): void
     {
-        $this->creation->userVerification = UserVerification::REQUIRED;
+        $this->creation->userVerification = UserVerification::Required;
 
         $this->response()
             ->assertSessionHas('_webauthn', function (Challenge $challenge): bool {
@@ -167,7 +166,7 @@ class CreatorTest extends DatabaseTestCase
             ->assertJson([
                 'timeout' => 60000,
                 'challenge' => session('_webauthn')->data->toBase64Url(),
-                'userVerification' => UserVerification::REQUIRED->value,
+                'userVerification' => UserVerification::Required->value,
             ]);
     }
 
@@ -189,6 +188,18 @@ class CreatorTest extends DatabaseTestCase
         $this->response()
             ->assertSessionHas('_webauthn', function (Challenge $challenge): bool {
                 return in_array('test_id', $challenge->properties['credentials'], true);
+            });
+    }
+
+    public function test_accepts_custom_challenge(): void
+    {
+        $this->creation->user = $this->user;
+
+        $this->creation->challenge = new Challenge(new ByteBuffer('1'), 10);
+
+        $this->response()
+            ->assertSessionHas('_webauthn', function (Challenge $challenge): bool {
+                return $challenge->data->hashEqual('1');
             });
     }
 }

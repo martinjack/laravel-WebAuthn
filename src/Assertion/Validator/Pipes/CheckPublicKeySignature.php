@@ -3,12 +3,12 @@
 namespace Laragear\WebAuthn\Assertion\Validator\Pipes;
 
 use Closure;
-use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Stringable;
 use Laragear\WebAuthn\Assertion\Validator\AssertionValidation;
 use Laragear\WebAuthn\ByteBuffer;
 use Laragear\WebAuthn\Exceptions\AssertionException;
+use Laragear\WebAuthn\JsonTransport;
 use Laragear\WebAuthn\Models\WebAuthnCredential;
 
 use function base64_decode;
@@ -34,8 +34,8 @@ class CheckPublicKeySignature
      */
     public function handle(AssertionValidation $validation, Closure $next): mixed
     {
-        $signature = $this->retrieveSignature($validation->request);
-        $verifiable = $this->retrieveBinaryVerifiable($validation->request);
+        $signature = $this->retrieveSignature($validation->json);
+        $verifiable = $this->retrieveBinaryVerifiable($validation->json);
 
         if ($this->challengeRequiresSodium($signature, $validation->credential)) {
             $this->validateWithSodium($signature, $verifiable, $validation->credential);
@@ -49,9 +49,9 @@ class CheckPublicKeySignature
     /**
      * Retrieves the signature of the data created by the authenticator.
      */
-    protected function retrieveSignature(Request $request): string
+    protected function retrieveSignature(JsonTransport $request): string
     {
-        $signature = ByteBuffer::decodeBase64Url($request->json('response.signature', ''));
+        $signature = ByteBuffer::decodeBase64Url($request->get('response.signature', ''));
 
         return $signature
             ?: throw AssertionException::make('Signature is empty.');
@@ -60,12 +60,12 @@ class CheckPublicKeySignature
     /**
      * Returns the binary representation of the authenticator and client data from the authenticator.
      */
-    protected function retrieveBinaryVerifiable(Request $request): string
+    protected function retrieveBinaryVerifiable(JsonTransport $request): string
     {
-        $verifiable = ByteBuffer::decodeBase64Url($request->json('response.authenticatorData')).
-            hash('sha256', ByteBuffer::decodeBase64Url($request->json('response.clientDataJSON')), true);
+        $verifiable = ByteBuffer::decodeBase64Url($request->get('response.authenticatorData')).
+            hash('sha256', ByteBuffer::decodeBase64Url($request->get('response.clientDataJSON')), true);
 
-        return $verifiable
+        return $verifiable // @phpstan-ignore-line
             ?: throw AssertionException::make('Authenticator Data or Client Data JSON are empty or malformed.');
     }
 

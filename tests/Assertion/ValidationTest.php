@@ -11,18 +11,20 @@ use Illuminate\Support\Facades\Event;
 use Laragear\WebAuthn\Assertion\Validator\AssertionValidation;
 use Laragear\WebAuthn\Assertion\Validator\AssertionValidator;
 use Laragear\WebAuthn\Assertion\Validator\Pipes\CheckPublicKeyCounterCorrect;
+use Laragear\WebAuthn\Assertion\Validator\Pipes\CheckPublicKeySignature;
 use Laragear\WebAuthn\Assertion\Validator\Pipes\CheckUserInteraction;
 use Laragear\WebAuthn\Attestation\AuthenticatorData;
 use Laragear\WebAuthn\ByteBuffer;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\Challenge\Challenge;
+use Laragear\WebAuthn\Events\CredentialAsserted;
 use Laragear\WebAuthn\Events\CredentialCloned;
 use Laragear\WebAuthn\Events\CredentialDisabled;
 use Laragear\WebAuthn\Exceptions\AssertionException;
+use Laragear\WebAuthn\JsonTransport;
 use Laragear\WebAuthn\Models\WebAuthnCredential;
 use Mockery;
 use Ramsey\Uuid\Uuid;
 use Symfony\Component\HttpFoundation\InputBag;
-use Symfony\Component\HttpFoundation\ParameterBag;
 use Tests\DatabaseTestCase;
 use Tests\FakeAuthenticator;
 use Tests\Stubs\WebAuthnAuthenticatableUser;
@@ -36,7 +38,6 @@ use function session;
 
 class ValidationTest extends DatabaseTestCase
 {
-    protected Request $request;
     protected WebAuthnAuthenticatableUser $user;
     protected AssertionValidation $validation;
     protected AssertionValidator $validator;
@@ -77,20 +78,14 @@ class ValidationTest extends DatabaseTestCase
             // Force booting the model if not booted previously.
             WebAuthnCredential::make();
 
-            $this->request = Request::create(
-                'https://test.app/webauthn/create', 'POST', content: json_encode(FakeAuthenticator::assertionResponse())
-            );
-
             $this->validator = new AssertionValidator($this->app);
-            $this->validation = new AssertionValidation($this->request);
+            $this->validation = new AssertionValidation(new JsonTransport(FakeAuthenticator::assertionResponse()));
 
             $this->challenge = new Challenge(
                 new ByteBuffer(base64_decode(FakeAuthenticator::ASSERTION_CHALLENGE)), 60, false,
             );
 
             $this->session(['_webauthn' => $this->challenge]);
-
-            $this->request->setLaravelSession($this->app->make('session.store'));
         });
 
         parent::setUp();
@@ -98,7 +93,29 @@ class ValidationTest extends DatabaseTestCase
 
     protected function validate(): AssertionValidation
     {
+        $this->validation->user = $this->user;
+
         return $this->validator->send($this->validation)->thenReturn();
+    }
+
+    public function test_assertion_creates_from_request_instance(): void
+    {
+        $request = Request::create('/');
+        $request->headers->set('content-type', 'application/json');
+        $request->setJson(new InputBag([
+            ...FakeAuthenticator::assertionResponse(),
+            'foo' => 'bar',
+            'clientExtensionResults' => 'baz',
+            'authenticatorAttachment' => 'quz',
+        ]));
+
+        $validation = AssertionValidation::fromRequest($request);
+
+        static::assertEquals([
+            ...FakeAuthenticator::assertionResponse(),
+            'clientExtensionResults' => 'baz',
+            'authenticatorAttachment' => 'quz',
+        ], $validation->json->toArray());
     }
 
     public function test_assertion_allows_user_instance(): void
@@ -116,7 +133,7 @@ class ValidationTest extends DatabaseTestCase
 
         unset($response['response']['userHandle']);
 
-        $this->request->setJson(new ParameterBag($response));
+        $this->validation->json = new JsonTransport($response);
 
         static::assertInstanceOf(AssertionValidation::class, $this->validator->send($this->validation)->thenReturn());
     }
@@ -133,7 +150,7 @@ class ValidationTest extends DatabaseTestCase
             'public_key' => Crypt::encryptString("-----BEGIN PUBLIC KEY-----\n$publicKey\n-----END PUBLIC KEY-----\n"),
         ]);
 
-        $this->validation->request->setJson(new InputBag($assertionResponse));
+        $this->validation->json = new JsonTransport($assertionResponse);
 
         $this->validation->user = WebAuthnAuthenticatableUser::query()->first();
 
@@ -152,7 +169,7 @@ class ValidationTest extends DatabaseTestCase
             'public_key' => Crypt::encryptString("-----BEGIN PUBLIC KEY-----\n$publicKey\n-----END PUBLIC KEY-----\n"),
         ]);
 
-        $this->validation->request->setJson(new InputBag($assertionResponse));
+        $this->validation->json = new JsonTransport($assertionResponse);
 
         $this->validation->user = WebAuthnAuthenticatableUser::query()->first();
 
@@ -161,7 +178,7 @@ class ValidationTest extends DatabaseTestCase
 
     public function test_assertion_increases_counter(): void
     {
-        static::assertInstanceOf(AssertionValidation::class, $this->validator->send($this->validation)->thenReturn());
+        static::assertInstanceOf(AssertionValidation::class, $this->validate());
 
         $this->assertDatabaseHas(WebAuthnCredential::class, [
             'id' => FakeAuthenticator::CREDENTIAL_ID,
@@ -242,7 +259,38 @@ class ValidationTest extends DatabaseTestCase
         $this->validate();
     }
 
-    public function test_credential_check_if_not_for_user_id(): void
+    public function test_credential_check_is_malformed_user_handle(): void
+    {
+        $assertionResponse = FakeAuthenticator::assertionResponse();
+
+        $assertionResponse['response']['userHandle'] = 'ggggggggggggggggggggggggggggggg';
+
+        $this->validation->json = new JsonTransport($assertionResponse);
+
+        $this->validation->user = WebAuthnAuthenticatableUser::query()->first();
+
+        $this->expectException(AssertionException::class);
+        $this->expectExceptionMessage(
+            'Assertion Error: The userHandle is not a valid hexadecimal UUID (32/36 characters).'
+        );
+
+        $this->validator->send($this->validation)->thenReturn();
+    }
+
+    public function test_credential_check_base64_user_handle(): void
+    {
+        $assertionResponse = FakeAuthenticator::assertionResponse();
+
+        $assertionResponse['response']['userHandle'] = base64_encode($assertionResponse['response']['userHandle']);
+
+        $this->validation->json = new JsonTransport($assertionResponse);
+
+        $this->validation->user = WebAuthnAuthenticatableUser::query()->first();
+
+        static::assertInstanceOf(AssertionValidation::class, $this->validator->send($this->validation)->thenReturn());
+    }
+
+    public function test_credential_check_is_not_for_user_id(): void
     {
         DB::table('webauthn_credentials')->where('id', FakeAuthenticator::CREDENTIAL_ID)->update([
             'user_id' => '4bde1e58dba94de4ab307f46611165cb',
@@ -272,7 +320,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['type'] = 'invalid';
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Response type is not [public-key].');
@@ -286,7 +334,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['authenticatorData'] = '';
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Authenticator Data does not exist or is empty.');
@@ -300,7 +348,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['authenticatorData'] = 'invalid';
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Authenticator Data: Invalid input.');
@@ -314,7 +362,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['clientDataJSON'] = 'foo';
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Client Data JSON is invalid or malformed.');
@@ -328,7 +376,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['clientDataJSON'] = ByteBuffer::encodeBase64Url(json_encode([]));
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Client Data JSON is empty.');
@@ -344,7 +392,7 @@ class ValidationTest extends DatabaseTestCase
             'origin' => '', 'challenge' => '',
         ]));
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Client Data JSON does not contain the [type] key.');
@@ -358,7 +406,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['clientDataJSON'] = base64_encode(json_encode(['type' => '', 'challenge' => '']));
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Client Data JSON does not contain the [origin] key.');
@@ -372,7 +420,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['clientDataJSON'] = base64_encode(json_encode(['type' => '', 'origin' => '']));
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Client Data JSON does not contain the [challenge] key.');
@@ -385,10 +433,14 @@ class ValidationTest extends DatabaseTestCase
         $invalid = FakeAuthenticator::assertionResponse();
 
         $invalid['response']['clientDataJSON'] = base64_encode(
-            json_encode(['type' => 'invalid', 'origin' => '', 'challenge' => ''])
+            json_encode([
+                'type' => 'invalid',
+                'origin' => '',
+                'challenge' => '',
+            ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Client Data type is not [webauthn.get].');
@@ -401,10 +453,14 @@ class ValidationTest extends DatabaseTestCase
         $invalid = FakeAuthenticator::assertionResponse();
 
         $invalid['response']['clientDataJSON'] = base64_encode(
-            json_encode(['type' => 'webauthn.get', 'origin' => 'https://localhost', 'challenge' => ''])
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'https://localhost',
+                'challenge' => '',
+            ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Response has an empty challenge.');
@@ -417,13 +473,87 @@ class ValidationTest extends DatabaseTestCase
         $invalid = FakeAuthenticator::assertionResponse();
 
         $invalid['response']['clientDataJSON'] = base64_encode(
-            json_encode(['type' => 'webauthn.get', 'origin' => 'https://localhost', 'challenge' => 'invalid'])
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'https://localhost',
+                'challenge' => 'invalid',
+            ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Response challenge is not equal.');
+
+        $this->validate();
+    }
+
+    public function test_check_origin_matches_non_url(): void
+    {
+        $this->app->make('config')->set('webauthn.origins', ['foo', 'bar.baz']);
+
+        $invalid = FakeAuthenticator::assertionResponse();
+
+        $invalid['response']['clientDataJSON'] = base64_encode(
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'foo',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
+        );
+
+        $this->validation->json = new JsonTransport($invalid);
+
+        // The signature will not match since it's tailored to the origin itself.
+        $this->mock(CheckPublicKeySignature::class, function (Mockery\MockInterface $mock): void {
+            $mock->expects('handle')->andReturnUsing(fn ($validation, $closure) => $closure($validation));
+        });
+
+        static::assertInstanceOf(AssertionValidation::class, $this->validate());
+    }
+
+    public function test_check_origin_matches_non_url_from_string(): void
+    {
+        $this->app->make('config')->set('webauthn.origins', 'foo,bar.baz');
+
+        $invalid = FakeAuthenticator::assertionResponse();
+
+        $invalid['response']['clientDataJSON'] = base64_encode(
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'foo',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
+        );
+
+        $this->validation->json = new JsonTransport($invalid);
+
+        // The signature will not match since it's tailored to the origin itself.
+        $this->mock(CheckPublicKeySignature::class, function (Mockery\MockInterface $mock): void {
+            $mock->expects('handle')->andReturnUsing(fn ($validation, $closure) => $closure($validation));
+        });
+
+        static::assertInstanceOf(AssertionValidation::class, $this->validate());
+    }
+
+    public function test_check_origin_doesnt_match_subdomain_from_non_origin_url(): void
+    {
+        $this->app->make('config')->set('webauthn.origins', 'foo,bar.baz');
+
+        $invalid = FakeAuthenticator::assertionResponse();
+
+        $invalid['response']['clientDataJSON'] = base64_encode(
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'bar.foo',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
+        );
+
+        $this->validation->json = new JsonTransport($invalid);
+
+        $this->expectException(AssertionException::class);
+        $this->expectExceptionMessage('Assertion Error: Response origin not allowed for this app.');
 
         $this->validate();
     }
@@ -433,10 +563,14 @@ class ValidationTest extends DatabaseTestCase
         $invalid = FakeAuthenticator::assertionResponse();
 
         $invalid['response']['clientDataJSON'] = base64_encode(
-            json_encode(['type' => 'webauthn.get', 'origin' => '', 'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE])
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => '',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Response has an empty origin.');
@@ -449,13 +583,17 @@ class ValidationTest extends DatabaseTestCase
         $invalid = FakeAuthenticator::assertionResponse();
 
         $invalid['response']['clientDataJSON'] = base64_encode(
-            json_encode(['type' => 'webauthn.get', 'origin' => 'invalid', 'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE])
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'invalid',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
-        $this->expectExceptionMessage('Assertion Error: Response origin is invalid.');
+        $this->expectExceptionMessage('Assertion Error: Response origin not allowed for this app.');
 
         $this->validate();
     }
@@ -466,13 +604,19 @@ class ValidationTest extends DatabaseTestCase
 
         /** @noinspection HttpUrlsUsage */
         $invalid['response']['clientDataJSON'] = base64_encode(
-            json_encode(['type' => 'webauthn.get', 'origin' => 'http://unsecure.com', 'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE])
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'http://unsecure.com',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
-        $this->expectExceptionMessage('Assertion Error: Response not made to a secure server (localhost or HTTPS).');
+        $this->expectExceptionMessage(
+            'Assertion Error: Response origin not made from a secure server (localhost or HTTPS).'
+        );
 
         $this->validate();
     }
@@ -489,7 +633,7 @@ class ValidationTest extends DatabaseTestCase
             ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Response has an empty origin.');
@@ -509,10 +653,10 @@ class ValidationTest extends DatabaseTestCase
             ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
-        $this->expectExceptionMessage('Assertion Error: Relying Party ID not scoped to current.');
+        $this->expectExceptionMessage('Assertion Error: Response origin not allowed for this app.');
 
         $this->validate();
     }
@@ -529,12 +673,34 @@ class ValidationTest extends DatabaseTestCase
             ])
         );
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
-        $this->expectExceptionMessage('Assertion Error: Relying Party ID not scoped to current.');
+        $this->expectExceptionMessage('Assertion Error: Response origin not allowed for this app.');
 
         $this->validate();
+    }
+
+    public function test_rp_id_passes_if_subdomain(): void
+    {
+        $invalid = FakeAuthenticator::assertionResponse();
+
+        $invalid['response']['clientDataJSON'] = base64_encode(
+            json_encode([
+                'type' => 'webauthn.get',
+                'origin' => 'http://valid.localhost:9780',
+                'challenge' => FakeAuthenticator::ASSERTION_CHALLENGE,
+            ])
+        );
+
+        $this->validation->json = new JsonTransport($invalid);
+
+        // The signature will not match since it's tailored to the origin itself.
+        $this->mock(CheckPublicKeySignature::class, function (Mockery\MockInterface $mock): void {
+            $mock->expects('handle')->andReturnUsing(fn ($validation, $closure) => $closure($validation));
+        });
+
+        static::assertInstanceOf(AssertionValidation::class, $this->validate());
     }
 
     public function test_rp_id_fails_if_hash_not_same(): void
@@ -598,7 +764,7 @@ class ValidationTest extends DatabaseTestCase
 
         $invalid['response']['signature'] = base64_encode('');
 
-        $this->request->setJson(new ParameterBag($invalid));
+        $this->validation->json = new JsonTransport($invalid);
 
         $this->expectException(AssertionException::class);
         $this->expectExceptionMessage('Assertion Error: Signature is empty.');
@@ -675,5 +841,31 @@ hQIDAQAB
 
             throw $e;
         }
+    }
+
+    public function test_assertion_dispatches_event_with_user()
+    {
+        $event = Event::fake(CredentialAsserted::class);
+
+        $this->validate();
+
+        $event->assertDispatched(CredentialAsserted::class, function (CredentialAsserted $event): bool {
+            return $event->user === $this->user
+                && $this->validation->credential === $event->credential;
+        });
+    }
+
+    public function test_assertion_dispatches_event_without_user()
+    {
+        $event = Event::fake(CredentialAsserted::class);
+
+        $this->validation->user = null;
+
+        $this->validator->send($this->validation)->thenReturn();
+
+        $event->assertDispatched(CredentialAsserted::class, function (CredentialAsserted $event): bool {
+            return $event->user === null
+                && $this->validation->credential === $event->credential;
+        });
     }
 }

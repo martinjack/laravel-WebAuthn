@@ -6,19 +6,18 @@ use Illuminate\Auth\AuthManager;
 use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use Laragear\WebAuthn\Challenge\SessionChallengeRepository;
 use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
-
-use function method_exists;
 
 /**
  * @internal
  */
 class WebAuthnServiceProvider extends ServiceProvider
 {
-    public const CONTROLLERS = __DIR__.'/../stubs/controllers';
-    public const CONFIG = __DIR__.'/../config/webauthn.php';
-    public const MIGRATIONS = __DIR__.'/../database/migrations';
-    public const JS = __DIR__.'/../resources/js';
+    public const string CONTROLLERS = __DIR__.'/../stubs/controllers';
+    public const string CONFIG = __DIR__.'/../config/webauthn.php';
+    public const string MIGRATIONS = __DIR__.'/../database/migrations';
+    public const string JS = __DIR__.'/../resources/js';
 
     /**
      * Register the service provider.
@@ -32,10 +31,8 @@ class WebAuthnServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(static::CONFIG, 'webauthn');
 
         $this->registerUser();
-
         $this->registerUserProvider();
-
-        Models\WebAuthnCredential::$useTable = 'webauthn_credentials';
+        $this->registerChallengeRepository();
     }
 
     /**
@@ -62,32 +59,12 @@ class WebAuthnServiceProvider extends ServiceProvider
      * Publishes migrations from the given path.
      *
      * @param  string[]|string  $paths
-     *
-     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
-    protected function publishesPackageMigrations(array|string $paths, string $groups = 'migrations'): void
+    protected function publishesPackageMigrations(array|string $paths): void
     {
-        if (method_exists(static::class, 'publishesMigrations')) {
-            foreach ((array) $paths as $path) {
-                $this->publishesMigrations([$path => $this->app->databasePath('migrations/')], 'migrations');
-            }
-
-            return;
+        foreach ((array) $paths as $path) {
+            $this->publishesMigrations([$path => $this->app->databasePath('migrations/')], 'migrations');
         }
-
-        $prefix = now()->format('Y_m_d_His');
-
-        $files = [];
-
-        foreach ($this->app->make('files')->files($paths) as $file) {
-            $filename = preg_replace('/^[\d|_]+/', '', $file->getFilename());
-
-            $files[$file->getRealPath()] = $this->app->databasePath("migrations/{$prefix}_$filename");
-        }
-
-        method_exists($this, 'publishesMigrations')
-            ? $this->publishesMigrations($files, $groups)
-            : $this->publishes($files, $groups);
     }
 
     /**
@@ -129,5 +106,18 @@ class WebAuthnServiceProvider extends ServiceProvider
                 }
             );
         });
+    }
+
+    /**
+     * Register the default challenge repository.
+     */
+    protected function registerChallengeRepository(): void
+    {
+        $this->app->bindIf(
+            Contracts\WebAuthnChallengeRepository::class,
+            static function (Application $app): Contracts\WebAuthnChallengeRepository {
+                return $app->make(SessionChallengeRepository::class);
+            }
+        );
     }
 }

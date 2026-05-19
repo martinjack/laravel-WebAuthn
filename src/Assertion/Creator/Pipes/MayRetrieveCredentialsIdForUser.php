@@ -19,7 +19,7 @@ class MayRetrieveCredentialsIdForUser
     {
         // If there is a user found, we will pluck the IDs and add them as a binary buffer.
         if ($assertion->user) {
-            $assertion->acceptedCredentials = $assertion->user->webAuthnCredentials()->get(['id', 'transports']);
+            $assertion->acceptedCredentials = $assertion->user->webAuthnCredentials()->get(['id', 'transports']); // @phpstan-ignore-line
 
             if ($assertion->acceptedCredentials->isNotEmpty()) {
                 $assertion->json->set('allowCredentials', $this->parseCredentials($assertion->acceptedCredentials));
@@ -32,12 +32,11 @@ class MayRetrieveCredentialsIdForUser
     /**
      * Adapt all credentials into an `allowCredentials` digestible array.
      *
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Laragear\WebAuthn\Models\WebAuthnCredential>  $credentials
      * @return \Illuminate\Support\Collection<int, array{id?: mixed, type: string, transports?: non-empty-array<int, string>}>
      */
     protected function parseCredentials(EloquentCollection $credentials): Collection
     {
-        return $credentials->map(static function (WebAuthnCredential $credential): array {
+        return $credentials->map(static function (WebAuthnCredential $credential): array {  // @phpstan-ignore-line
             return array_filter([
                 'id' => $credential->getKey(),
                 'type' => 'public-key',

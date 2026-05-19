@@ -144,7 +144,7 @@ class ByteBuffer implements JsonSerializable, Jsonable, Stringable
     /**
      * Returns a certain portion of these bytes.
      */
-    public function getBytes(int $offset = 0, int $length = null): string
+    public function getBytes(int $offset = 0, ?int $length = null): string
     {
         $length ??= $this->dataLength;
 
@@ -379,8 +379,6 @@ class ByteBuffer implements JsonSerializable, Jsonable, Stringable
 
     /**
      * Create a random ByteBuffer.
-     *
-     * @throws \Random\RandomException
      */
     public static function makeRandom(int $length): static
     {

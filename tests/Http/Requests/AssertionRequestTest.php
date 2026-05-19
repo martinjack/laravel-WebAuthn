@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Laragear\WebAuthn\Assertion\Creator\AssertionCreation;
 use Laragear\WebAuthn\Assertion\Creator\AssertionCreator;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\Challenge\Challenge;
 use Laragear\WebAuthn\Http\Requests\AssertionRequest;
 use Laragear\WebAuthn\JsonTransport;
 use Tests\DatabaseTestCase;
@@ -29,7 +29,7 @@ class AssertionRequestTest extends DatabaseTestCase
         ]);
     }
 
-    protected function defineRoutes($router)
+    protected function defineRoutes($router): void
     {
         $router->middleware('web')->post('test', function (AssertionRequest $request) {
             return $request->toVerify();

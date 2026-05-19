@@ -21,7 +21,7 @@ class RetrievesCredentialId
      */
     public function handle(AssertionValidation $validation, Closure $next): mixed
     {
-        $id = $validation->request->json('id');
+        $id = $validation->json->get('id');
 
         // First, always check if the credential is on the list of accepted credentials IDs
         // before going to the database to retrieve the complete credential in question.
@@ -30,7 +30,7 @@ class RetrievesCredentialId
         }
 
         // We can now find the credential.
-        $validation->credential = WebAuthnCredential::whereKey($id)->first();
+        $validation->credential = WebAuthnCredential::whereKey($id)->first(); // @phpstan-ignore-line
 
         if (! $validation->credential) {
             throw AssertionException::make('Credential ID does not exist.');

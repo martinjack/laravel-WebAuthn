@@ -17,16 +17,14 @@ class SetResidentKeyConfiguration
      */
     public function handle(AttestationCreation $attestable, Closure $next): mixed
     {
-        if ($attestable->residentKey) {
-            $attestable->json->set('authenticatorSelection.residentKey', $attestable->residentKey->value);
+        $attestable->json->set('authenticatorSelection.residentKey', $attestable->residentKey->value);
 
-            $verifiesUser = $attestable->residentKey === ResidentKey::REQUIRED;
+        $verifiesUser = $attestable->residentKey === ResidentKey::Required;
 
-            $attestable->json->set('authenticatorSelection.requireResidentKey', $verifiesUser);
+        $attestable->json->set('authenticatorSelection.requireResidentKey', $verifiesUser);
 
-            if ($verifiesUser) {
-                $attestable->userVerification = UserVerification::REQUIRED;
-            }
+        if ($verifiesUser) {
+            $attestable->userVerification = UserVerification::Required;
         }
 
         return $next($attestable);

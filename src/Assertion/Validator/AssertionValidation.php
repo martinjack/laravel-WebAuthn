@@ -4,25 +4,28 @@ namespace Laragear\WebAuthn\Assertion\Validator;
 
 use Illuminate\Http\Request;
 use Laragear\WebAuthn\Attestation\AuthenticatorData;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\Challenge\Challenge;
 use Laragear\WebAuthn\ClientDataJson;
 use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
+use Laragear\WebAuthn\JsonTransport;
 use Laragear\WebAuthn\Models\WebAuthnCredential;
 
 class AssertionValidation
 {
     /**
-     * Create a new Assertion Validation.
+     * Keys that should be extracted from the Assertion Validation Request.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable|null  $user
-     * @param  \Laragear\WebAuthn\Challenge|null  $challenge
-     * @param  \Laragear\WebAuthn\Models\WebAuthnCredential|null  $credential
-     * @param  \Laragear\WebAuthn\ClientDataJson|null  $clientDataJson
-     * @param  \Laragear\WebAuthn\Attestation\AuthenticatorData|null  $authenticatorData
+     * @const array
+     */
+    public const REQUEST_KEYS = [
+        'id', 'rawId', 'response', 'type', 'clientExtensionResults', 'authenticatorAttachment',
+    ];
+
+    /**
+     * Create a new Assertion Validation instance.
      */
     public function __construct(
-        public Request $request,
+        public JsonTransport $json,
         public ?WebAuthnAuthenticatable $user = null,
         public ?Challenge $challenge = null,
         public ?WebAuthnCredential $credential = null,
@@ -30,5 +33,14 @@ class AssertionValidation
         public ?AuthenticatorData $authenticatorData = null,
     ) {
         //
+    }
+
+    /**
+     * Create a new Assertion Validation instance from a WebAuthn request data.
+     */
+    public static function fromRequest(?Request $request = null): static
+    {
+        // @phpstan-ignore-next-line
+        return new static(new JsonTransport(($request ?? app('request'))->only(static::REQUEST_KEYS)));
     }
 }

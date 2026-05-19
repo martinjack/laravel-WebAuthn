@@ -3,6 +3,9 @@
 namespace Tests\Http\Requests;
 
 use Illuminate\Auth\Events\Login;
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Auth\StatefulGuard;
+use Illuminate\Contracts\Session\Session as SessionContract;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -10,7 +13,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Laragear\WebAuthn\Assertion\Validator\AssertionValidator;
 use Laragear\WebAuthn\ByteBuffer;
-use Laragear\WebAuthn\Challenge;
+use Laragear\WebAuthn\Challenge\Challenge;
 use Laragear\WebAuthn\Http\Requests\AssertedRequest;
 use Mockery;
 use Ramsey\Uuid\Uuid;
@@ -262,7 +265,7 @@ class AssertedRequestTest extends DatabaseTestCase
             $request->login(destroySession: true);
         });
 
-        $session = Mockery::mock(\Illuminate\Contracts\Session\Session::class);
+        $session = Mockery::mock(SessionContract::class);
 
         $session->expects('regenerate')->with(true)->andReturn();
 
@@ -275,5 +278,63 @@ class AssertedRequestTest extends DatabaseTestCase
             ->andReturn();
 
         $this->postJson('custom', FakeAuthenticator::assertionResponse())->assertOk();
+    }
+
+    public function test_logins_with_callbacks(): void
+    {
+        Route::middleware('web')->post('custom-false', function (AssertedRequest $request) {
+            $request->login(callbacks: function ($user): bool {
+                static::assertInstanceOf(WebAuthnAuthenticatableUser::class, $user);
+
+                return false;
+            });
+        });
+
+        Route::middleware('web')->post('custom-true', function (AssertedRequest $request) {
+            $request->login(callbacks: function ($user): bool {
+                static::assertInstanceOf(WebAuthnAuthenticatableUser::class, $user);
+
+                return true;
+            });
+        });
+
+        $session = Mockery::mock(SessionContract::class);
+
+        // Expect it only once. The second callback doesn't reach a second execution since it fails.
+        $session->expects('regenerate')->with(false)->andReturn();
+
+        $this->app->resolving(AssertedRequest::class, function (AssertedRequest $request) use ($session): void {
+            $request->setLaravelSession($session);
+        });
+
+        $this->mock(AssertionValidator::class)
+            ->expects('send->thenReturn')
+            ->twice()
+            ->andReturn();
+
+        $this->postJson('custom-false', FakeAuthenticator::assertionResponse())->assertOk();
+
+        $this->assertGuest();
+
+        $this->postJson('custom-true', FakeAuthenticator::assertionResponse())->assertOk();
+
+        $this->assertAuthenticated();
+    }
+
+    public function test_login_callback_fails_if_session_guard_does_not_supports_callbacks(): void
+    {
+        Route::middleware('web')->post('custom', function (AssertedRequest $request) {
+            $request->login(callbacks: fn (): bool => true);
+        });
+
+        $guard = Mockery::mock(StatefulGuard::class);
+        $guard->expects('attempt')->never();
+        $guard->expects('attemptWhen')->never();
+
+        $this->mock(AuthFactory::class)->expects('guard')->with(null)->andReturn($guard);
+
+        $this->postJson('custom', FakeAuthenticator::assertionResponse())
+            ->assertJsonPath('message', 'The [web] guard does not support attempt callbacks.')
+            ->assertServerError();
     }
 }

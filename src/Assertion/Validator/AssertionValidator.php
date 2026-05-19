@@ -15,20 +15,20 @@ class AssertionValidator extends Pipeline
      * @var array
      */
     protected $pipes = [
-        Pipes\RetrieveChallenge::class,
-        Pipes\RetrievesCredentialId::class,
-        Pipes\CheckCredentialIsForUser::class,
         Pipes\CheckTypeIsPublicKey::class,
         Pipes\CompileAuthenticatorData::class,
         Pipes\CompileClientDataJson::class,
         Pipes\CheckCredentialIsWebAuthnGet::class,
+        Pipes\RetrieveChallenge::class,
         Pipes\CheckChallengeSame::class,
-        Pipes\CheckOriginSecure::class,
+        Pipes\RetrievesCredentialId::class,
+        Pipes\CheckCredentialIsForUser::class,
         Pipes\CheckRelyingPartyIdContained::class,
         Pipes\CheckRelyingPartyHashSame::class,
         Pipes\CheckUserInteraction::class,
         Pipes\CheckPublicKeySignature::class,
         Pipes\CheckPublicKeyCounterCorrect::class,
         Pipes\IncrementCredentialCounter::class,
+        Pipes\FireCredentialAssertedEvent::class,
     ];
 }
